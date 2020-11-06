@@ -1,8 +1,9 @@
 import functools
 
-from aws import get_secret
 from elasticsearch import Elasticsearch
 from wellcome_storage_service import RequestsOAuthStorageServiceClient
+
+from aws import get_secret
 
 
 BAGS_INDEX = "storage_stage_bags"

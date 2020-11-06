@@ -31,7 +31,7 @@ if __name__ == "__main__":
     app = WsgiDAVApp(config)
 
     server_args = {
-        "bind_addr": ("0.0.0.0", 8875),
+        "bind_addr": ("localhost", 8875),
         "wsgi_app": app,
     }
     server = wsgi.Server(**server_args)
