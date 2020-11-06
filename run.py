@@ -1,6 +1,6 @@
 from cheroot import wsgi
 from wsgidav.wsgidav_app import WsgiDAVApp
-from server import VirtualResourceProvider
+from dav_provider import StorageServiceProvider
 
 from wsgidav.debug_filter import WsgiDavDebugFilter
 from wsgidav.dir_browser import WsgiDavDirBrowser
@@ -15,12 +15,12 @@ import logging
 
 logger = logging.getLogger("wsgidav")
 logger.propagate = True
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.INFO)
 
 import sys
 
 handler = logging.StreamHandler(sys.stdout)
-handler.setLevel(logging.DEBUG)
+handler.setLevel(logging.INFO)
 formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 handler.setFormatter(formatter)
 logger.addHandler(handler)
@@ -31,7 +31,7 @@ config = {
     "host": "0.0.0.0",
     "port": 8080,
     "provider_mapping": {
-        "/": VirtualResourceProvider(),
+        "/": StorageServiceProvider(),
         },
     "verbose": 1,
     # https://github.com/mar10/wsgidav/blob/2e375551f1961380d7afd2cbcf3bef32bb98b8d7/wsgidav/default_conf.py#L47-L53
