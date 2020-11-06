@@ -2,6 +2,13 @@
 
 This is some experimental code that creates a WebDAV server for browsing the virtual filesystem used by the [Wellcome storage service](https://github.com/wellcomecollection/storage-service).
 
+-   [Why build this?](#why-build-this)
+-   [How does it work?](#how-does-it-work)
+-   [What will I see?](#what-will-i-see)
+-   [What happens next?](#what-happens-next)
+-   [Further reading](#further-reading)
+-   [License](#license)
+
 
 
 ## Why build this?
