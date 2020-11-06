@@ -1,4 +1,4 @@
-# storage-service-wsgidav
+# storage-service-webdav
 
 This is some experimental code that creates a WebDAV server for browsing the virtual filesystem used by the [Wellcome storage service](https://github.com/wellcomecollection/storage-service).
 
