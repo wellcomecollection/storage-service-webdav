@@ -25,7 +25,7 @@ If we later have to redigitise a single page, the new version of the bag can con
 
 Here's a simple example:
 
-![](virtual_filesystem.png)
+![Diagram showing how files in the storage service (left, green) map to files in S3 (right, red). There are six files on the left, and four objects on the right. Six arrows connect the files on the left to objects on the right.](virtual_filesystem.png)
 
 (For more on how versioning works, read [*How we store multiple versions of BagIt bags*](https://stacks.wellcomecollection.org/how-we-store-multiple-versions-of-bagit-bags-e68499815184).)
 
@@ -93,21 +93,21 @@ Some of the data comes directly from the storage service APIs; some of it comes 
 
 At the top level, you see all the spaces in the storage service:
 
-![](screenshot1_spaces.png)
+![A list of folders with names like "digitised", "miro" and "born-digital".](screenshot1_spaces.png)
 
 If you drill down a layer, you see all the external identifiers in a particular space:
 
-![](screenshot2_externalIdentifiers.png)
+![The list above, with the "digitised" folder expanded. Under this folder is a list of directories starting "b" – "b1203390x", "b1926320x", "b2044249x", and so on.](screenshot2_externalIdentifiers.png)
 
 (Note: identifiers that contain slashes will be collapsed so they appear as a single directory in this list.)
 
 If you look inside an external identifier, you see all the versions of that (space, external identifier) pair:
 
-![](screenshot3_versions.png)
+![The directory "b3223756x" expanded, to show two more directories underneath: "v1" and "v2".](screenshot3_versions.png)
 
 If you drill down into a version directory, you can browse and download all the files in the bag.
 
-![](screenshot4_bag_files.png)
+![The "v2" directory expanded to show a small tree of further files and folders.](screenshot4_bag_files.png)
 
 
 
