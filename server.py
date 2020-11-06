@@ -183,37 +183,9 @@ def _get_res_by_key(key):
 # ============================================================================
 #
 # ============================================================================
-from aws import create_elastic_client
+from storage_service import _create_elastic_client as create_elastic_client
 
 elastic_client = create_elastic_client()
-
-
-class TopLevelBrowser(DAVCollection):
-    """
-    Browse the top-level spaces of the storage service.
-
-    This resolves top-level requests '/'.
-    """
-    def __init__(self, environ):
-        super().__init__("/", environ)
-
-    def get_member_names(self):
-        resp = elastic_client.search(
-            index="storage_stage_bags",
-            body={
-                "aggs": {
-                    "spaces": {
-                        "terms": {"field": "space"}
-                    }
-                },
-                "size": 0
-            }
-        )
-        buckets = resp["aggregations"]["spaces"]["buckets"]
-        return sorted(b["key"] for b in buckets)
-
-    def get_member(self, name):
-        return SpaceBrowser(join_uri(self.path, name), self.environ, space=name)
 
 
 class SpaceBrowser(DAVCollection):
@@ -320,9 +292,6 @@ class BagPathBrowser(DAVCollection):
             else:
                 self.members["directories"].add(f["name"].split("/", bagPath.count("/") + 1)[-2])
 
-        print("@@AWLC", self.bagPath, self.members)
-
-
     def get_display_info(self):
         return {"type": "ExternalIdentifier", "space": self.space, "externalIdentifier": self.externalIdentifier, "version": self.bagVersion, "bagPath": self.bagPath}
 
@@ -330,6 +299,9 @@ class BagPathBrowser(DAVCollection):
         return sorted(list(self.members["directories"]) + list(self.members["files"]))
 
     def get_member(self, name):
+        if name.startswith("._"):
+            return None
+
         if name in self.members["directories"]:
             return BagPathBrowser(
                 path=join_uri(self.path, name), environ=self.environ, space=self.space, externalIdentifier=self.externalIdentifier, bagVersion=self.bagVersion,
@@ -788,5 +760,6 @@ class VirtualResourceProvider(DAVProvider):
         """
         _logger.info("get_resource_inst('%s')" % path)
         self._count_get_resource_inst += 1
+        from dav_provider import TopLevelBrowser
         root = TopLevelBrowser(environ)
         return root.resolve("", path)
