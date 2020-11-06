@@ -183,23 +183,198 @@ def _get_res_by_key(key):
 # ============================================================================
 #
 # ============================================================================
-class RootCollection(DAVCollection):
-    """Resolve top-level requests '/'."""
+from aws import create_elastic_client
 
-    _visibleMemberNames = ("by_orga", "by_tag", "by_status")
-    _validMemberNames = _visibleMemberNames + ("by_key",)
+elastic_client = create_elastic_client()
 
+
+class TopLevelBrowser(DAVCollection):
+    """
+    Browse the top-level spaces of the storage service.
+
+    This resolves top-level requests '/'.
+    """
     def __init__(self, environ):
-        DAVCollection.__init__(self, "/", environ)
+        super().__init__("/", environ)
 
     def get_member_names(self):
-        return self._visibleMemberNames
+        resp = elastic_client.search(
+            index="storage_stage_bags",
+            body={
+                "aggs": {
+                    "spaces": {
+                        "terms": {"field": "space"}
+                    }
+                },
+                "size": 0
+            }
+        )
+        buckets = resp["aggregations"]["spaces"]["buckets"]
+        return sorted(b["key"] for b in buckets)
 
     def get_member(self, name):
-        # Handle visible categories and also /by_key/...
-        if name in self._validMemberNames:
-            return CategoryTypeCollection(join_uri(self.path, name), self.environ)
-        return None
+        return SpaceBrowser(join_uri(self.path, name), self.environ, space=name)
+
+
+class SpaceBrowser(DAVCollection):
+    """
+    Browse within a space in the storage service.
+    """
+    def __init__(self, path, environ, space):
+        super().__init__(path, environ)
+        self.space = space
+
+    def get_display_info(self):
+        return {"type": "Space", "space": self.space}
+
+    def get_member_names(self):
+        resp = elastic_client.search(
+            index="storage_stage_bags",
+            body={
+  "query": {
+    "bool": {
+      "must": [
+        {"term": {
+          "space": {
+            "value": self.space
+          }
+        }}
+      ]
+    }
+  },
+  "_source": "info.externalIdentifier",
+  "size": 10000
+}
+        )
+        hits = resp["hits"]["hits"]
+        # https://stackoverflow.com/questions/9847288/is-it-possible-to-use-in-a-filename#comment12550838_9847306
+        return sorted(h["_source"]["info"]["externalIdentifier"].replace("/", "\u29f8") for h in hits)
+
+    def get_member(self, name):
+        return ExternalIdentifierBrowser(join_uri(self.path, name), self.environ, space=self.space, externalIdentifier=name.replace("\u29f8", "/"))
+
+
+import functools
+from wellcome_storage_service import RequestsOAuthStorageServiceClient
+
+storage_client = RequestsOAuthStorageServiceClient.from_path(api_url="https://api-stage.wellcomecollection.org/storage/v1")
+
+@functools.lru_cache()
+def get_bag(space, externalIdentifier, version):
+    return storage_client.get_bag(space, externalIdentifier, version)
+
+
+class ExternalIdentifierBrowser(DAVCollection):
+    """
+    Browse within the versions of a bag in the storage service.
+    """
+    def __init__(self, path, environ, space, externalIdentifier):
+        super().__init__(path, environ)
+        self.space = space
+        self.externalIdentifier = externalIdentifier
+
+    def get_display_info(self):
+        return {"type": "ExternalIdentifier", "space": self.space, "externalIdentifier": self.externalIdentifier}
+
+    def get_member_names(self):
+        resp = elastic_client.get(
+            index="storage_stage_bags",
+            id=f"{self.space}/{self.externalIdentifier}",
+            params={
+                "_source": "version"
+            }
+        )
+        version = resp["_source"]["version"]
+
+        return [f"v{v}" for v in range(1, version + 1)]
+
+    def get_member(self, bagVersion):
+        return BagPathBrowser(path=join_uri(self.path, bagVersion), environ=self.environ, space=self.space, externalIdentifier=self.externalIdentifier, bagVersion=bagVersion.replace("._", ""))
+
+
+class BagPathBrowser(DAVCollection):
+    """
+    Browse within a bag.
+    """
+    def __init__(self, path, environ, space, externalIdentifier, bagVersion, bagPath=""):
+        super().__init__(path, environ)
+        self.space = space
+        self.externalIdentifier = externalIdentifier
+        self.bagVersion = bagVersion
+        self.bagPath = bagPath
+        self.bag = get_bag(space, externalIdentifier, bagVersion)
+
+        # TODO: This is a bit fiddly
+        self.members = {
+            "files": {},
+            "directories": set(),
+        }
+
+        import os
+
+        for f in self.bag["manifest"]["files"] + self.bag["tagManifest"]["files"]:
+            if f["name"].count("/") == bagPath.count("/"):
+                self.members["files"][os.path.basename(f["name"])] = f["path"]
+            elif not f['name'].startswith(bagPath):
+                continue
+            else:
+                self.members["directories"].add(f["name"].split("/", bagPath.count("/") + 1)[-2])
+
+        print("@@AWLC", self.bagPath, self.members)
+
+
+    def get_display_info(self):
+        return {"type": "ExternalIdentifier", "space": self.space, "externalIdentifier": self.externalIdentifier, "version": self.bagVersion, "bagPath": self.bagPath}
+
+    def get_member_names(self):
+        return sorted(list(self.members["directories"]) + list(self.members["files"]))
+
+    def get_member(self, name):
+        if name in self.members["directories"]:
+            return BagPathBrowser(
+                path=join_uri(self.path, name), environ=self.environ, space=self.space, externalIdentifier=self.externalIdentifier, bagVersion=self.bagVersion,
+                bagPath=os.path.join(self.bagPath, name) + "/"
+            )
+        else:
+            return VirtualBagFile(
+                path=join_uri(self.path, name), environ=self.environ,
+                s3_location=self.bag["location"],
+                file_path=self.members["files"][name]
+            )
+
+from aws import get_aws_client
+
+s3 = get_aws_client("s3", role_arn="arn:aws:iam::975596993436:role/storage-read_only")
+
+
+class VirtualBagFile(DAVNonCollection):
+    def __init__(self, path, environ, s3_location, file_path):
+        super().__init__(path, environ)
+        self.s3_location = s3_location
+        self.file_path = file_path
+
+    @property
+    def s3_bucket(self):
+        return self.s3_location["bucket"]
+
+    @property
+    def s3_key(self):
+        return os.path.join(self.s3_location["path"], self.file_path)
+
+    def get_content_length(self):
+        return s3.head_object(Bucket=self.s3_bucket, Key=self.s3_key)["ContentLength"]
+
+    def get_content_type(self):
+        return util.guess_mime_type(self.file_path)
+
+    def get_content(self):
+        return s3.get_object(Bucket=self.s3_bucket, Key=self.s3_key)["Body"]
+        # mime = self.get_content_type()
+        # GC issue 57: always store as binary
+        # if mime.startswith("text"):
+        #     return open(self.file_path, "r", BUFFER_SIZE)
+        # return open(self.file_path, "rb", BUFFER_SIZE)
+
 
 
 class CategoryTypeCollection(DAVCollection):
@@ -613,95 +788,5 @@ class VirtualResourceProvider(DAVProvider):
         """
         _logger.info("get_resource_inst('%s')" % path)
         self._count_get_resource_inst += 1
-        root = RootCollection(environ)
+        root = TopLevelBrowser(environ)
         return root.resolve("", path)
-
-
-# class VirtualResourceProvider(DAVProvider):
-#    """
-#    DAV provider that serves a VirtualResource derived structure.
-#    """
-#    def __init__(self):
-#        super(VirtualResourceProvider, self).__init__()
-#        self.resourceData = _resourceData
-#        self.rootCollection = VirtualCollection(self, "/", environ)
-#
-#
-#    def get_resource_inst(self, path, environ):
-#        """Return _VirtualResource object for path.
-#
-#        path is expected to be
-#            categoryType/category/name/artifact
-#        for example:
-#            'by_tag/cool/My doc 2/info.html'
-#
-#        See DAVProvider.get_resource_inst()
-#        """
-#        self._count_get_resource_inst += 1
-#
-#        catType, cat, resName, artifactName = util.save_split(path.strip("/"), "/", 3)
-#
-#        _logger.info("get_resource_inst('%s'): catType=%s, cat=%s, resName=%s" % (path, catType,
-#             cat, resName))
-#
-#        if catType and catType not in _alllowedCategories:
-#            return None
-#
-#        if catType == _realCategory:
-#            # Accessing /by_key/<key>
-#            data = _get_res_by_key(cat)
-#            if data:
-#                return VirtualResource(self, path, environ, data)
-#            return None
-#
-#        elif resName:
-#            # Accessing /<catType>/<cat>/<name> or /<catType>/<cat>/<resName>/<artifactName>
-#            res = None
-#            for data in _get_res_list_by_attr(catType, cat):
-#                if data["title"] == resName:
-#                    res = data
-#                    break
-#            if not res:
-#                return None
-#            # Accessing /<catType>/<cat>/<name>
-#            if artifactName in _artifactNames:
-#                # Accessing /<catType>/<cat>/<name>/.info.html, or similar
-#                return VirtualArtifact(self, util.join_uri(path, artifactName), environ,
-#                                       res, artifactName)
-#            elif artifactName:
-#                # Accessing /<catType>/<cat>/<name>/<file-name>
-#                for f in res["resPathList"]:
-#                    if artifactName == os.path.basename(f):
-#                        return VirtualResFile(self, path, environ, res, f)
-#                return None
-#            # Accessing /<catType>/<cat>/<name>
-#            return VirtualResource(self, path, environ, data)
-#
-#        elif cat:
-#            # Accessing /catType/cat: return list of matching names
-#            resList = _get_res_list_by_attr(catType, cat)
-#            nameList = [ data["title"] for data in resList ]
-#            return VirtualCollection(self, path, environ, nameList)
-#
-#        elif catType:
-#            # Accessing /catType/: return all possible values for this catType
-#            if catType in _browsableCategories:
-#                resList = []
-#                for data in _resourceData:
-#                    if catType == "by_status":
-#                        if not data["status"] in resList:
-#                            resList.append(data["status"])
-#                    elif catType == "by_orga":
-#                        if not data["orga"] in resList:
-#                            resList.append(data["orga"])
-#                    elif catType == "by_tag":
-#                        for tag in data["tags"]:
-#                            if not tag in resList:
-#                                resList.append(tag)
-#
-#                return VirtualCollection(self, path, environ, resList)
-#            # Known category type, but not browsable (e.g. 'by_key')
-#            raise DAVError(HTTP_FORBIDDEN)
-#
-#        # Accessing /: return list of categories
-#        return VirtualCollection(self, path, environ, _browsableCategories)
