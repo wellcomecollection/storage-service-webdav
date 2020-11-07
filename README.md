@@ -21,7 +21,7 @@ The file appears in two different bag versions, but only once in the object stor
 This reduces our storage costs.
 
 For example, suppose we digitise a book, with one image per page.
-If we later have to redigitise a single page, the new version of the bag can contain the single new image, rather than duplicating all the previous pages.
+If we later have to redigitise a single page, the new version of the bag can contain the single new image and point back to images in previous versions of the bag, rather than duplicating all the previous pages.
 
 Here's a simple example:
 
